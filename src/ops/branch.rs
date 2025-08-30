@@ -2,7 +2,7 @@ use super::{selected_rev, Action, OpTrait};
 use crate::{
     app::{App, PromptParams, State},
     error::Error,
-    git::{get_current_branch_name, is_branch_merged},
+    git::{get_current_branch_name, is_branch_merged, does_branch_exist},
     item_data::{ItemData, RefKind},
     menu::arg::Arg,
     term::Term,
@@ -133,3 +133,72 @@ pub fn delete(app: &mut App, term: &mut Term, branch_name: &str) -> Res<()> {
     app.run_cmd(term, &[], cmd)?;
     Ok(())
 }
+
+pub(crate) struct Spinoff;
+impl OpTrait for Spinoff {
+    fn get_action(&self, target: &ItemData) -> Option<Action> {
+        let default = match target {
+            ItemData::Reference {
+                kind: RefKind::Branch(branch),
+                ..
+            } => Some(branch.clone()),
+            _ => None,
+        };
+
+        Some(Rc::new(move |app: &mut App, term: &mut Term| {
+            let default = default.clone();
+
+            let new_branch_name = app.prompt(
+                term,
+                &PromptParams {
+                    prompt: "Name for new branch",
+                    create_default_value: Box::new(move |_| default.clone()),
+                    ..Default::default()
+                },
+            )?;
+
+            if new_branch_name.is_empty() {
+                return Err(Error::BranchNameRequired);
+            }
+
+            if does_branch_exist(&app.state.repo, &new_branch_name).unwrap_or(false) {
+                app.display_error(&format!("Cannot spin off {new_branch_name}. It already exists"));
+            }
+
+            let current_branch = get_current_branch_name(&app.state.repo);
+
+            if current_branch.is_none() {
+                app.display_error("No branch checked out");
+            }
+
+            let current_branch = current_branch.unwrap();
+
+            if current_branch == new_branch_name {
+                // TODO: Update error enum
+                return Err(Error::CannotDeleteCurrentBranch);
+            }
+
+            let base_commit = unimplemented!();
+            let upstream_branch_commit = unimplemented!();
+
+            // Checkout new branch
+            let mut cmd = Command::new("git");
+            cmd.args(["checkout", "-b", &new_branch_name]);
+            app.run_cmd(term, &[], cmd)?;
+
+            if base_commit == upstream_branch_commit {
+                app.display_info(&format!("Branch {current_branch} not changed"));
+                return Ok(())
+            }
+
+            // TODO: Reset the original branch to the common ancestor
+
+            Ok(())
+        }))
+    }
+
+    fn display(&self, _state: &State) -> String {
+        "Spinoff branch".into()
+    }
+}
+
