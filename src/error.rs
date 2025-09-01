@@ -26,6 +26,7 @@ pub enum Error {
     GetCurrentBranchUpstreamUtf8(Utf8Error),
     RemoteNameUtf8(Utf8Error),
     CannotDeleteCurrentBranch,
+    CannotSpinoffCurrentBranch,
     BranchNameRequired,
     IsBranchMerged(git2::Error),
     GetRemote(git2::Error),

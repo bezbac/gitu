@@ -2,13 +2,16 @@ use super::{selected_rev, Action, OpTrait};
 use crate::{
     app::{App, PromptParams, State},
     error::Error,
-    git::{get_current_branch_name, is_branch_merged, does_branch_exist},
+    git::{
+        does_branch_exist, get_current_branch, get_current_branch_name, is_branch_merged,
+        remote::get_branch_upstream,
+    },
     item_data::{ItemData, RefKind},
     menu::arg::Arg,
     term::Term,
     Res,
 };
-use std::{process::Command, rc::Rc};
+use std::{fmt::Pointer, process::Command, rc::Rc};
 
 pub(crate) fn init_args() -> Vec<Arg> {
     vec![]
@@ -162,36 +165,74 @@ impl OpTrait for Spinoff {
             }
 
             if does_branch_exist(&app.state.repo, &new_branch_name).unwrap_or(false) {
-                app.display_error(&format!("Cannot spin off {new_branch_name}. It already exists"));
+                app.display_error(format!(
+                    "Cannot spin off {new_branch_name}. It already exists"
+                ));
             }
 
-            let current_branch = get_current_branch_name(&app.state.repo);
+            let current_branch = get_current_branch(&app.state.repo);
 
-            if current_branch.is_none() {
+            let Ok(current_branch) = current_branch else {
                 app.display_error("No branch checked out");
+                return Ok(());
+            };
+
+            // TODO: Update error enum
+            let Some(current_branch_name) = current_branch.name().map_err(Error::GetHead)? else {
+                app.display_error("Checked out branch does not have a name");
+                return Ok(());
+            };
+
+            if current_branch_name == new_branch_name {
+                return Err(Error::CannotSpinoffCurrentBranch);
             }
 
-            let current_branch = current_branch.unwrap();
-
-            if current_branch == new_branch_name {
-                // TODO: Update error enum
-                return Err(Error::CannotDeleteCurrentBranch);
-            }
-
-            let base_commit = unimplemented!();
-            let upstream_branch_commit = unimplemented!();
+            let base_commit = &app.state.repo.head().map_err(Error::GetHead)?;
+            let upstream_branch_commit =
+                get_branch_upstream(&current_branch)?.map(|branch| branch.into_reference());
 
             // Checkout new branch
             let mut cmd = Command::new("git");
             cmd.args(["checkout", "-b", &new_branch_name]);
             app.run_cmd(term, &[], cmd)?;
 
-            if base_commit == upstream_branch_commit {
-                app.display_info(&format!("Branch {current_branch} not changed"));
-                return Ok(())
+            if upstream_branch_commit.is_none() {
+                app.display_info(&format!("Branch {current_branch_name} not changed"));
+                return Ok(());
             }
 
-            // TODO: Reset the original branch to the common ancestor
+            let upstream_branch_commit = upstream_branch_commit.unwrap();
+
+            if base_commit == &upstream_branch_commit {
+                app.display_info(&format!("Branch {current_branch_name} not changed"));
+                return Ok(());
+            }
+
+            let Some(base_oid) = base_commit.target() else {
+                app.display_error("Could not resolve OID of base commit");
+                return Ok(());
+            };
+
+            let Some(upstream_oid) = upstream_branch_commit.target() else {
+                app.display_error("Could not resolve OID of upstream branch commit");
+                return Ok(());
+            };
+
+            let merge_base = &app.state.repo.merge_base(base_oid, upstream_oid).unwrap();
+
+            let mut cmd = Command::new("git");
+            cmd.args([
+                "update-ref",
+                "-m",
+                &format!(r##""reset: moving to {merge_base}""##),
+                &format!("refs/heads/{base_oid}"),
+                &merge_base.to_string(),
+            ]);
+            app.run_cmd(term, &[], cmd)?;
+
+            app.display_info(&format!(
+                "Branch {current_branch_name} was reset to {merge_base}"
+            ));
 
             Ok(())
         }))
@@ -201,4 +242,3 @@ impl OpTrait for Spinoff {
         "Spinoff branch".into()
     }
 }
-
