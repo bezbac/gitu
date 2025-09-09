@@ -11,7 +11,7 @@ use crate::{
     term::Term,
     Res,
 };
-use std::{fmt::Pointer, process::Command, rc::Rc};
+use std::{process::Command, rc::Rc};
 
 pub(crate) fn init_args() -> Vec<Arg> {
     vec![]
@@ -170,15 +170,18 @@ impl OpTrait for Spinoff {
                 ));
             }
 
-            let current_branch = get_current_branch(&app.state.repo);
-
-            let Ok(current_branch) = current_branch else {
+            let Ok(current_branch) = get_current_branch(&app.state.repo) else {
                 app.display_error("No branch checked out");
                 return Ok(());
             };
 
             // TODO: Update error enum
-            let Some(current_branch_name) = current_branch.name().map_err(Error::GetHead)? else {
+            let Some(current_branch_name) = current_branch
+                .name()
+                .map_err(Error::GetHead)?
+                .map(|n| n.to_string())
+            else {
+                drop(current_branch);
                 app.display_error("Checked out branch does not have a name");
                 return Ok(());
             };
@@ -187,38 +190,46 @@ impl OpTrait for Spinoff {
                 return Err(Error::CannotSpinoffCurrentBranch);
             }
 
-            let base_commit = &app.state.repo.head().map_err(Error::GetHead)?;
-            let upstream_branch_commit =
-                get_branch_upstream(&current_branch)?.map(|branch| branch.into_reference());
+            let base_commit_oid =
+                (&app.state.repo.head().map_err(Error::GetHead)?.target()).clone();
+
+            let upstream_branch_commit_oid = get_branch_upstream(&current_branch)?
+                .map(|branch| branch.into_reference())
+                .map(|x| x.target())
+                .clone();
+
+            drop(current_branch);
 
             // Checkout new branch
             let mut cmd = Command::new("git");
             cmd.args(["checkout", "-b", &new_branch_name]);
             app.run_cmd(term, &[], cmd)?;
 
-            if upstream_branch_commit.is_none() {
-                app.display_info(&format!("Branch {current_branch_name} not changed"));
+            let Some(upstream_branch_commit_oid) = upstream_branch_commit_oid else {
+                app.display_info(format!("Branch {current_branch_name} not changed"));
+                return Ok(());
+            };
+
+            if base_commit_oid == upstream_branch_commit_oid {
+                app.display_info(format!("Branch {current_branch_name} not changed"));
                 return Ok(());
             }
 
-            let upstream_branch_commit = upstream_branch_commit.unwrap();
-
-            if base_commit == &upstream_branch_commit {
-                app.display_info(&format!("Branch {current_branch_name} not changed"));
-                return Ok(());
-            }
-
-            let Some(base_oid) = base_commit.target() else {
+            let Some(base_oid) = base_commit_oid else {
                 app.display_error("Could not resolve OID of base commit");
                 return Ok(());
             };
 
-            let Some(upstream_oid) = upstream_branch_commit.target() else {
+            let Some(upstream_oid) = upstream_branch_commit_oid else {
                 app.display_error("Could not resolve OID of upstream branch commit");
                 return Ok(());
             };
 
-            let merge_base = &app.state.repo.merge_base(base_oid, upstream_oid).unwrap();
+            let merge_base = &app
+                .state
+                .repo
+                .merge_base(base_oid.clone(), upstream_oid)
+                .unwrap();
 
             let mut cmd = Command::new("git");
             cmd.args([
@@ -230,7 +241,7 @@ impl OpTrait for Spinoff {
             ]);
             app.run_cmd(term, &[], cmd)?;
 
-            app.display_info(&format!(
+            app.display_info(format!(
                 "Branch {current_branch_name} was reset to {merge_base}"
             ));
 

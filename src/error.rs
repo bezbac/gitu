@@ -26,7 +26,6 @@ pub enum Error {
     GetCurrentBranchUpstreamUtf8(Utf8Error),
     RemoteNameUtf8(Utf8Error),
     CannotDeleteCurrentBranch,
-    CannotSpinoffCurrentBranch,
     BranchNameRequired,
     IsBranchMerged(git2::Error),
     GetRemote(git2::Error),
@@ -53,6 +52,8 @@ pub enum Error {
     OpenLogFile(io::Error),
     PromptAborted,
     NoMoreEvents,
+    CannotSpinoffCurrentBranch,
+    DoesBranchExist(git2::Error),
 }
 
 impl std::error::Error for Error {}
@@ -143,6 +144,10 @@ impl Display for Error {
             Error::OpenLogFile(e) => f.write_fmt(format_args!("Couldn't open log file: {}", e)),
             Error::PromptAborted => f.write_str("Aborted"),
             Error::NoMoreEvents => unimplemented!(),
+            Error::CannotSpinoffCurrentBranch => f.write_str("Cannot spin-off current branch"),
+            Error::DoesBranchExist(e) => {
+                f.write_fmt(format_args!("Couldn't check if branch exists: {}", e))
+            }
         }
     }
 }

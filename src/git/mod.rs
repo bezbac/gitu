@@ -270,5 +270,7 @@ pub(crate) fn is_branch_merged(repo: &git2::Repository, name: &str) -> Res<bool>
 }
 
 pub(crate) fn does_branch_exist(repo: &git2::Repository, name: &str) -> Res<bool> {
-    repo.find_branch(name, git2::BranchType::Local).map(|_| true)
+    repo.find_branch(name, git2::BranchType::Local)
+        .map(|_| true)
+        .map_err(Error::DoesBranchExist)
 }
