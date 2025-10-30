@@ -78,6 +78,45 @@ fn log_other(app: &mut App, _term: &mut Term, result: &str) -> Res<()> {
     Ok(())
 }
 
+pub(crate) struct LogReferences;
+impl OpTrait for LogReferences {
+    fn get_action(&self, _target: &ItemData) -> Option<Action> {
+        Some(Rc::new(move |app: &mut App, term: &mut Term| {
+            let rev = app.prompt(
+                term,
+                &PromptParams {
+                    prompt: "Log rev",
+                    create_default_value: Box::new(selected_rev),
+                    ..Default::default()
+                },
+            )?;
+
+            log_references(app, term, &rev)?;
+            Ok(())
+        }))
+    }
+
+    fn display(&self, _state: &State) -> String {
+        "references".into()
+    }
+}
+
+fn log_references(app: &mut App, _term: &mut Term, result: &str) -> Res<()> {
+    let oid_result = match app.state.repo.revparse_single(result) {
+        Ok(rev) => Ok(rev.id()),
+        Err(err) => Err(Error::FindGitRev(err)),
+    };
+
+    if oid_result.is_err() {
+        app.close_menu();
+    }
+
+    let oid = oid_result?;
+
+    goto_log_screen(app, Some(oid));
+    Ok(())
+}
+
 fn goto_log_screen(app: &mut App, rev: Option<Oid>) {
     app.state.screens.drain(1..);
     let size = app.state.screens.last().unwrap().size;

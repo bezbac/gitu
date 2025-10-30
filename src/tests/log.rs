@@ -76,3 +76,8 @@ fn log_other_input() {
 fn log_other_invalid() {
     snapshot!(setup(setup_clone!()), "lo <enter>");
 }
+
+#[test]
+fn log_references() {
+    snapshot!(setup(setup_clone!()), "la<enter>");
+}
